@@ -1,7 +1,7 @@
-from datetime import datetime
+from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db import models
-from django.db.models import Count
+from django.db.models import Count, Sum
 
 
 # Create your models here.
@@ -20,25 +20,29 @@ class Product(models.Model):
         return self.name
 
     # # Функция переформирования групп, чтобы количество учеников не отличалось больше, чем на 1
-    # def groups_rebuild(self):
-    #     # Проверка, что курс ещё не начался
-    #     if True:
-    #         groups = Group.objects.filter(product=self).annotate(Count('users')).prefetch_related('users')
-    #         # Проверка, что группы существуют
-    #         if groups:
-    #             smallest_group = min(groups, key=lambda x: x.users__count)
-    #             shortage = self.max_group - smallest_group.users__count
-    #             # Проверка, что есть разница в количестве учеников больше 1
-    #             if shortage > 1:
-    #                 list_transfer_users = []
-    #                 nums_group = len(groups)
-    #                 # Выборка необходимого количества пользователей из максимально заполненных групп
-    #                 for _ in range(self.max_group - shortage):
-    #                     group = max(groups, key=lambda x: x.users__count)
-    #                     transfer_user = group.users.first()
-    #                     list_transfer_users.append(transfer_user)
-    #                     group.users.remove(transfer_user)
-    #                 smallest_group.users.add(*list_transfer_users)
+    def groups_rebuild(self):
+        # Проверка, что курс ещё не начался
+        if self.start > timezone.now():
+            groups = (Group.objects.filter(product=self).annotate(Count('users')).
+                      prefetch_related('users').order_by('users__count'))
+            # Проверка: группы существуют и разница в количестве участников больше 1
+            if groups.count() > 1 and (groups.last().users__count - groups.first().users__count > 1):
+                users_number = groups.aggregate(Sum('users__count'))['users__count__sum']  # Всего участников
+                shortage = users_number // groups.count() - groups.first().users__count  # Недобор в наименьшей группе
+                list_transfer_users = []
+                    # Выборка необходимого количества пользователей из максимально заполненных групп
+                for _ in range(shortage):
+                    group = max(groups, key=lambda x: x.users__count)
+                    transfer_user = group.users.first()
+                    list_transfer_users.append(transfer_user)
+                    group.users.remove(transfer_user)
+                groups.first().users.add(*list_transfer_users)
+                return 'Группы перукомплектованы'
+            else:
+                return "Группы же укомплектованы корректно"
+        else:
+            return "Невозможно переукомплектовать группы, курс уже начался"
+
 
 
 
